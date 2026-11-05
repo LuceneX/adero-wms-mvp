@@ -3,6 +3,15 @@
   "name": "adero-wms-mvp",
   "main": "src/index.js",
   "compatibility_date": "2026-11-05",
+  "workers_dev": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "adero-wms-mvp-prod",
+      "database_id": "83bd9840-1ac5-45cd-a6cc-5aa858bc67c5",
+      "migrations_dir": "./migrations"
+    }
+  ],
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",

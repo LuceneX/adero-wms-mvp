@@ -1,10 +1,10 @@
 # ADERO WMS conversation starter
 
-This is a deliberately small, dependency-free prototype for an initial conversation with SIA ADERO. It is not a production warehouse-management system and it does not connect to ADERO, GitHub projects, carriers, scanners, accounting, customs, or a database.
+This is a deliberately small, dependency-free prototype for an initial conversation with SIA ADERO. It is not a production warehouse-management system and it does not connect to ADERO, carriers, scanners, accounting, or customs. It does use a dedicated Cloudflare D1 database for the demo dataset and user accounts.
 
 ## Run it
 
-1. Open `index.html` directly in a modern browser, or serve this folder with any static web server.
+1. Open the public demo at https://wms.lucenex.lv/.
 2. If you want a local server, run `python3 -m http.server 8080` from this folder and open `http://localhost:8080`.
 3. Walk through Overview → Inbound → Inventory → Outbound → Locations → Discovery.
 4. Use **Record arrival**, **Simulate receiving next arrival**, **Start pick wave**, and **Scan item** to show the prototype responding.
@@ -22,13 +22,13 @@ This is a deliberately small, dependency-free prototype for an initial conversat
 
 - Responsive operational dashboard
 - Seeded arrival, stock, location, order, exception, and activity records
-- Local-only arrival creation and simulated status transitions
+- Database-backed arrival creation and simulated status transitions
 - Inventory search and a scan-to-search interaction
 - Discovery questions embedded in the product flow
 - Clear prototype / verified-context boundary in the interface
 
 ## What is intentionally not implemented
 
-Authentication, roles, audit-safe persistence, barcode hardware, label printing, temperature telemetry, customs documents, carrier integrations, customer portals, billing, accounting, ERP integration, multi-site controls, offline mobile operation, concurrency, backups, monitoring, security hardening, and legal/compliance controls.
+Email verification, role administration, password reset, barcode hardware, label printing, temperature telemetry, customs documents, carrier integrations, customer portals, billing, accounting, ERP integration, multi-site controls, offline mobile operation, concurrency, backups, monitoring, security hardening, and legal/compliance controls.
 
 See `RESEARCH.md`, `ARCHITECTURE.md`, and `DISCOVERY.md` in this folder.

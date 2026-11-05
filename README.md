@@ -5,6 +5,8 @@ Conversation-ready warehouse operations MVP for SIA ADERO, deployed as a Cloudfl
 Public demo: https://wms.lucenex.lv/
 Fallback URL: https://adero-wms-mvp.smalikisernests.workers.dev/
 
+The live prototype now uses a Cloudflare D1 database for warehouse records and supports real user registration and sign-in. Open the demo and create a test operator account to interact with it.
+
 This MVP is an original client-specific layer informed by three organization-owned upstream forks:
 
 - [LuceneX/GreaterWMS](https://github.com/LuceneX/GreaterWMS) — primary WMS reference

@@ -2,7 +2,7 @@
 
 ## Prototype
 
-The demo is one static `index.html` with inline CSS and JavaScript. It uses seeded in-memory records and browser-only interactions. There is no backend, database, login, external API, or durable storage. This makes it easy to hand over, run offline, and use in a meeting.
+The public MVP is a static `index.html` served by a Cloudflare Worker, with a small Worker API and a dedicated Cloudflare D1 database. It has seeded operational records plus real demo user registration and expiring cookie sessions. It is intentionally small enough to use in a meeting while exercising real persistence.
 
 ## Recommended production foundation
 
