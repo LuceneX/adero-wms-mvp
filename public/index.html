@@ -193,5 +193,23 @@
   new MutationObserver(addAdjustmentForm).observe(result,{childList:true,subtree:true});
 })();
 </script>
+<script>
+  // Browser-safe adapter based on the GreaterWMS scanner/DataWedge payload contract.
+  // Native Zebra wrappers can call receiveIntent() without coupling the SPA to Cordova.
+  window.LucenexScannerAdapter = {
+    receive: barcode => {
+      const input = document.getElementById('scannerInput');
+      if (!input || !barcode) return false;
+      input.value = String(barcode).trim();
+      input.dispatchEvent(new KeyboardEvent('keydown', {key:'Enter', bubbles:true}));
+      return true;
+    },
+    receiveIntent: intent => {
+      const extras = intent?.extras || intent || {};
+      return window.LucenexScannerAdapter.receive(extras['com.symbol.datawedge.data_string'] || extras.data || extras.barcode);
+    }
+  };
+  window.addEventListener('wms:datawedge', event => window.LucenexScannerAdapter.receiveIntent(event.detail));
+</script>
 </body>
 </html>

@@ -10,6 +10,8 @@ Canonical forks are owned by the LuceneX organization:
 
 The MVP frontend is deliberately separate from the upstream applications. This makes the executive demo safe to iterate without implying that the upstream code has already passed deployment, security, license, integration, or workflow validation.
 
-## Proposed next integration step
+## Current integration status
 
-After ADERO confirms the first real workflow, create a proof-of-concept branch in `LuceneX/GreaterWMS` that implements one vertical slice against anonymized data. Compare that slice against the same domain contract in the other two forks before selecting the production base.
+The first practical integration is complete in the MVP scanner workspace: its keyboard-wedge and camera flows are native to the Cloudflare SPA, while the optional browser bridge accepts the Zebra/DataWedge payload contract used by GreaterWMS. The inventory adjustment, movement ledger, tenant authorization, and audit model remain LuceneX-owned code so they can run on D1.
+
+See [`docs/FORK-INTEGRATION.md`](FORK-INTEGRATION.md) for the component map, licensing boundary, and next adapter points.
