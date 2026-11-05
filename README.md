@@ -2,6 +2,8 @@
 
 Conversation-ready warehouse operations MVP for SIA ADERO, deployed as a Cloudflare Worker with static assets.
 
+Public demo: https://adero-wms-mvp.smalikisernests.workers.dev/
+
 This MVP is an original client-specific layer informed by three organization-owned upstream forks:
 
 - [LuceneX/GreaterWMS](https://github.com/LuceneX/GreaterWMS) — primary WMS reference
@@ -21,6 +23,8 @@ python3 -m http.server 8080 --directory public
 ## Deploy
 
 The public demo is deployed to Cloudflare Workers. The repository includes `wrangler.jsonc` and `src/index.js` so the deployment can later move to a normal CI/CD path with a pinned Wrangler version.
+
+See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for the current Cloudflare account, URL, and deployment handoff notes.
 
 ## Important boundary
 
