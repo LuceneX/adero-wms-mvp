@@ -16,6 +16,7 @@ const same = (left, right) => { if (left.length !== right.length) return false; 
 const cookie = request => Object.fromEntries((request.headers.get("Cookie") || "").split(";").map(part => part.trim().split("=")).filter(part => part.length === 2));
 const sessionCookie = token => `${SESSION_COOKIE}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}`;
 const clearCookie = `${SESSION_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
+const clearWarehouseCookie = `${ACTIVE_WAREHOUSE_COOKIE}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
 const body = async request => { try { return await request.json(); } catch { return {}; } };
 const id = prefix => `${prefix}-${crypto.randomUUID()}`;
 
@@ -59,7 +60,7 @@ async function api(request, env, url) {
     const token = randomToken(32); await env.DB.prepare(`INSERT INTO sessions (token_hash,user_id,expires_at) VALUES (?,?,datetime('now','+14 days'))`).bind(await digest(token), user.id).run();
     return json({user:{id:user.id,email:user.email,name:user.name,role:user.role}}, 200, {"set-cookie":sessionCookie(token)});
   }
-  if (url.pathname === "/api/auth/logout" && request.method === "POST") { const token = cookie(request)[SESSION_COOKIE]; if (token) await env.DB.prepare(`DELETE FROM sessions WHERE token_hash=?`).bind(await digest(token)).run(); return json({ok:true}, 200, {"set-cookie":clearCookie}); }
+  if (url.pathname === "/api/auth/logout" && request.method === "POST") { const token = cookie(request)[SESSION_COOKIE]; if (token) await env.DB.prepare(`DELETE FROM sessions WHERE token_hash=?`).bind(await digest(token)).run(); const response = json({ok:true}); response.headers.append("set-cookie", clearCookie); response.headers.append("set-cookie", clearWarehouseCookie); return response; }
   const user = await requireUser(request, env);
   if (url.pathname === "/api/dashboard" && request.method === "GET") return json(await dashboard(env, user));
   if (url.pathname === "/api/admin/overview" && request.method === "GET") {

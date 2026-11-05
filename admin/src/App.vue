@@ -3,6 +3,7 @@
     <q-header bordered class="bg-white text-grey-9">
       <q-toolbar class="admin-toolbar">
         <q-toolbar-title class="text-weight-medium">LuceneX Admin Console</q-toolbar-title>
+        <q-btn flat dense icon="logout" aria-label="Log out" @click="logout" />
         <q-btn flat dense icon="open_in_new" label="Open operations" href="/" />
       </q-toolbar>
     </q-header>
@@ -20,7 +21,7 @@
           <q-item-section avatar><q-icon name="group" /></q-item-section><q-item-section>Users & roles</q-item-section>
         </q-item>
       </q-list>
-      <div class="drawer-foot">Access is enforced by the Worker API and warehouse membership.</div>
+      <div class="drawer-foot">Access is enforced by the Worker API and warehouse membership.<q-btn flat dense icon="logout" label="Log out" class="full-width q-mt-md" @click="logout" /></div>
     </q-drawer>
 
     <q-page-container>
@@ -80,6 +81,7 @@ const saveMembership=async()=>{try{await api('/api/admin/memberships',{method:'P
 const editMembership=row=>{editing.value=row;editRole.value=row.membership_role;editStatus.value=row.status;editDialog.value=true;};
 const updateMembership=async()=>{try{await api(`/api/admin/memberships/${editing.value.id}/${editing.value.warehouse_id}`,{method:'PATCH',body:JSON.stringify({role:editRole.value,status:editStatus.value})});editDialog.value=false;Notify.create({type:'positive',message:'Membership updated'});await load();}catch(e){Notify.create({type:'negative',message:e.message});}};
 const switchWarehouse=async id=>{try{await api('/api/admin/switch-warehouse',{method:'POST',body:JSON.stringify({warehouse_id:id})});Notify.create({type:'positive',message:'Warehouse switched'});await load();}catch(e){Notify.create({type:'negative',message:e.message});}};
+const logout=async()=>{try{await fetch('/api/auth/logout',{method:'POST'});}finally{window.location.assign('/');}};
 onMounted(load);
 </script>
 
