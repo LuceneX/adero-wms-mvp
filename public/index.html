@@ -171,5 +171,27 @@
   document.getElementById('cameraScan').onclick = async () => { if (!('BarcodeDetector' in window) || !navigator.mediaDevices?.getUserMedia) { showResult('error','CAMERA_UNAVAILABLE','Camera scanning unavailable','This browser does not expose BarcodeDetector or camera access. Use a USB/Bluetooth scanner or enter the barcode manually.'); return; } try { const detector = new BarcodeDetector({formats:['ean_13','ean_8','code_128','qr_code','data_matrix']}); cameraStream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}}}); video.srcObject=cameraStream; await video.play(); cameraBox.style.display='block'; const scanFrame = async () => { if (!cameraStream) return; try { const codes = await detector.detect(video); if (codes[0]?.rawValue) { scanInput.value=codes[0].rawValue; stopCamera(); await processScan(); return; } } catch {} requestAnimationFrame(scanFrame); }; scanFrame(); } catch { showResult('error','CAMERA_UNAVAILABLE','Camera could not start','Allow camera access or use a hardware scanner instead.'); stopCamera(); } };
 })();
 </script>
+<script>
+(() => {
+  const result = document.getElementById('scanResult');
+  const addAdjustmentForm = () => {
+    if (!result.classList.contains('success') || result.querySelector('.adjustment-form')) return;
+    const sku = result.querySelector('.scan-item span')?.textContent;
+    const item = [...document.querySelectorAll('#inventoryRows tr')].find(row => row.textContent.includes(sku));
+    const itemId = item?.querySelector('td')?.textContent.trim();
+    if (!itemId) return;
+    const form = document.createElement('div');
+    form.className = 'adjustment-form';
+    form.style.cssText = 'margin-top:14px;padding-top:12px;border-top:1px solid #d6d6d6;display:grid;grid-template-columns:1fr 1fr;gap:8px';
+    form.innerHTML = '<input id="adjustDelta" type="number" step="1" placeholder="Quantity change" aria-label="Quantity change"><select id="adjustStatus" aria-label="New status"><option value="">Keep status</option><option>Available</option><option>Quality hold</option><option>Put away complete</option><option>Picking</option><option>Depleted</option></select><input id="adjustReason" placeholder="Reason for change" aria-label="Reason for change" style="grid-column:1 / -1"><button class="button primary" id="applyAdjustment" style="grid-column:1 / -1">Apply inventory change</button><div id="adjustmentMessage" style="grid-column:1 / -1;font-size:11px;color:#777"></div>';
+    result.appendChild(form);
+    document.getElementById('applyAdjustment').onclick = async () => {
+      const message = document.getElementById('adjustmentMessage'); message.textContent = 'Saving…';
+      try { const response = await fetch('/api/inventory/'+encodeURIComponent(itemId)+'/adjust',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({delta:Number(document.getElementById('adjustDelta').value),status:document.getElementById('adjustStatus').value,reason:document.getElementById('adjustReason').value})}); const body = await response.json(); if (!response.ok) throw new Error((body.error?.code || 'REQUEST_FAILED')+': '+(body.error?.message || body.error || 'Request failed')); message.textContent = body.code+': '+body.message; } catch (error) { message.textContent = error.message; message.style.color='#9b3f16'; }
+    };
+  };
+  new MutationObserver(addAdjustmentForm).observe(result,{childList:true,subtree:true});
+})();
+</script>
 </body>
 </html>

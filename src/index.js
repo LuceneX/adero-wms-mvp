@@ -20,17 +20,17 @@ const id = prefix => `${prefix}-${crypto.randomUUID()}`;
 async function currentUser(request, env) {
   const token = cookie(request)[SESSION_COOKIE];
   if (!token) return null;
-  return env.DB.prepare(`SELECT users.id, users.email, users.name, users.role FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token_hash=? AND sessions.expires_at > datetime('now')`).bind(await digest(token)).first();
+  return env.DB.prepare(`SELECT users.id, users.email, users.name, COALESCE(warehouse_memberships.role, users.role) AS role, warehouse_memberships.company_id, warehouse_memberships.warehouse_id FROM sessions JOIN users ON users.id=sessions.user_id LEFT JOIN warehouse_memberships ON warehouse_memberships.user_id=users.id AND warehouse_memberships.status='active' WHERE sessions.token_hash=? AND sessions.expires_at > datetime('now') LIMIT 1`).bind(await digest(token)).first();
 }
 async function requireUser(request, env) { const user = await currentUser(request, env); if (!user) throw new Response(JSON.stringify({error:"Sign in required"}), {status:401, headers:{"content-type":"application/json"}}); return user; }
-async function activity(env, icon, text, userId = null) { await env.DB.prepare(`INSERT INTO activities (id,icon,text,relative_time,user_id) VALUES (?,?,?,?,?)`).bind(id("act"), icon, text, "Just now", userId).run(); }
-async function dashboard(env) {
+async function activity(env, icon, text, userId = null, companyId = "co-lucenex-demo", warehouseId = "wh-lucenex-demo") { await env.DB.prepare(`INSERT INTO activities (id,icon,text,relative_time,user_id,company_id,warehouse_id) VALUES (?,?,?,?,?,?,?)`).bind(id("act"), icon, text, "Just now", userId, companyId, warehouseId).run(); }
+async function dashboard(env, user) {
   const [arrivals, inventory, orders, activities, counts] = await Promise.all([
-    env.DB.prepare(`SELECT id,ref,party,goods,expected,status FROM arrivals ORDER BY created_at DESC`).all(),
-    env.DB.prepare(`SELECT id,sku,barcode,lot,location,storage_class,quantity,status FROM inventory_items ORDER BY created_at DESC`).all(),
-    env.DB.prepare(`SELECT id,order_no,destination,lines,due,status FROM orders ORDER BY created_at DESC`).all(),
-    env.DB.prepare(`SELECT icon,text,relative_time FROM activities ORDER BY created_at DESC LIMIT 8`).all(),
-    env.DB.prepare(`SELECT (SELECT COALESCE(SUM(quantity),0) FROM inventory_items) AS units, (SELECT COUNT(*) FROM arrivals WHERE status != 'Received') AS arrivals, (SELECT COUNT(*) FROM orders WHERE status NOT IN ('Dispatched','Complete')) AS orders, (SELECT COUNT(*) FROM inventory_items WHERE status != 'Available') AS exceptions`).first()
+    env.DB.prepare(`SELECT id,ref,party,goods,expected,status FROM arrivals WHERE company_id=? AND warehouse_id=? ORDER BY created_at DESC`).bind(user.company_id,user.warehouse_id).all(),
+    env.DB.prepare(`SELECT id,sku,barcode,lot,location,storage_class,quantity,status FROM inventory_items WHERE company_id=? AND warehouse_id=? ORDER BY created_at DESC`).bind(user.company_id,user.warehouse_id).all(),
+    env.DB.prepare(`SELECT id,order_no,destination,lines,due,status FROM orders WHERE company_id=? AND warehouse_id=? ORDER BY created_at DESC`).bind(user.company_id,user.warehouse_id).all(),
+    env.DB.prepare(`SELECT icon,text,relative_time FROM activities WHERE company_id=? AND warehouse_id=? ORDER BY created_at DESC LIMIT 8`).bind(user.company_id,user.warehouse_id).all(),
+    env.DB.prepare(`SELECT (SELECT COALESCE(SUM(quantity),0) FROM inventory_items WHERE company_id=? AND warehouse_id=?) AS units, (SELECT COUNT(*) FROM arrivals WHERE company_id=? AND warehouse_id=? AND status != 'Received') AS arrivals, (SELECT COUNT(*) FROM orders WHERE company_id=? AND warehouse_id=? AND status NOT IN ('Dispatched','Complete')) AS orders, (SELECT COUNT(*) FROM inventory_items WHERE company_id=? AND warehouse_id=? AND status != 'Available') AS exceptions`).bind(user.company_id,user.warehouse_id,user.company_id,user.warehouse_id,user.company_id,user.warehouse_id,user.company_id,user.warehouse_id).first()
   ]);
   return {arrivals:arrivals.results, inventory:inventory.results, orders:orders.results, activities:activities.results, counts};
 }
@@ -41,10 +41,10 @@ async function api(request, env, url) {
   if (url.pathname === "/api/auth/register" && request.method === "POST") {
     const input = await body(request); const email = String(input.email || "").trim().toLowerCase(); const name = String(input.name || "").trim(); const password = String(input.password || "");
     if (!email.includes("@") || !name || password.length < 8) return json({error:"Enter a name, valid email, and password of at least 8 characters."}, 400);
-    const salt = randomToken(16); const hash = await passwordHash(password, salt); const userId = id("usr");
-    try { await env.DB.prepare(`INSERT INTO users (id,email,name,password_hash,password_salt) VALUES (?,?,?,?,?)`).bind(userId,email,name,hash,salt).run(); } catch { return json({error:"That email is already registered."}, 409); }
+    const salt = randomToken(16); const hash = await passwordHash(password, salt); const userId = id("usr"); const assignedRole = email === "ernests@lucenex.lv" ? "admin" : "operator";
+    try { await env.DB.prepare(`INSERT INTO users (id,email,name,password_hash,password_salt,role) VALUES (?,?,?,?,?,?)`).bind(userId,email,name,hash,salt,assignedRole).run(); await env.DB.prepare(`INSERT INTO warehouse_memberships (user_id,company_id,warehouse_id,role) VALUES (?,?,?,?)`).bind(userId,"co-lucenex-demo","wh-lucenex-demo",assignedRole).run(); } catch { return json({error:"That email is already registered."}, 409); }
     const token = randomToken(32); await env.DB.prepare(`INSERT INTO sessions (token_hash,user_id,expires_at) VALUES (?,?,datetime('now','+14 days'))`).bind(await digest(token), userId).run();
-    return json({user:{id:userId,email,name,role:"operator"}}, 201, {"set-cookie":sessionCookie(token)});
+    return json({user:{id:userId,email,name,role:assignedRole}}, 201, {"set-cookie":sessionCookie(token)});
   }
   if (url.pathname === "/api/auth/login" && request.method === "POST") {
     const input = await body(request); const email = String(input.email || "").trim().toLowerCase(); const password = String(input.password || ""); const user = await env.DB.prepare(`SELECT * FROM users WHERE email=?`).bind(email).first();
@@ -54,7 +54,7 @@ async function api(request, env, url) {
   }
   if (url.pathname === "/api/auth/logout" && request.method === "POST") { const token = cookie(request)[SESSION_COOKIE]; if (token) await env.DB.prepare(`DELETE FROM sessions WHERE token_hash=?`).bind(await digest(token)).run(); return json({ok:true}, 200, {"set-cookie":clearCookie}); }
   const user = await requireUser(request, env);
-  if (url.pathname === "/api/dashboard" && request.method === "GET") return json(await dashboard(env));
+  if (url.pathname === "/api/dashboard" && request.method === "GET") return json(await dashboard(env, user));
   if (url.pathname === "/api/scans" && request.method === "POST") {
     const input = await body(request);
     const barcode = String(input.barcode || "").trim();
@@ -62,26 +62,41 @@ async function api(request, env, url) {
     const allowedModes = new Set(["lookup", "receive", "putaway", "pick", "count"]);
     if (!barcode) return scannerError("BARCODE_REQUIRED", "Scan or enter a barcode before submitting.", 400, {field:"barcode"});
     if (!allowedModes.has(mode)) return scannerError("SCAN_MODE_INVALID", "Choose a valid scanner action.", 400, {allowed:[...allowedModes]});
-    const item = await env.DB.prepare(`SELECT id,sku,barcode,lot,location,storage_class,quantity,status FROM inventory_items WHERE barcode=? OR sku=? LIMIT 1`).bind(barcode, barcode).first();
+    const item = await env.DB.prepare(`SELECT id,sku,barcode,lot,location,storage_class,quantity,status FROM inventory_items WHERE company_id=? AND warehouse_id=? AND (barcode=? OR sku=?) LIMIT 1`).bind(user.company_id,user.warehouse_id,barcode, barcode).first();
     if (!item) {
-      await env.DB.prepare(`INSERT INTO scanner_events (id,barcode,mode,outcome,message,user_id) VALUES (?,?,?,?,?,?)`).bind(id("scan"),barcode,mode,"rejected","Barcode was not found in inventory",user.id).run();
+      await env.DB.prepare(`INSERT INTO scanner_events (id,barcode,mode,outcome,message,user_id,company_id,warehouse_id) VALUES (?,?,?,?,?,?,?,?)`).bind(id("scan"),barcode,mode,"rejected","Barcode was not found in inventory",user.id,user.company_id,user.warehouse_id).run();
       return scannerError("BARCODE_NOT_FOUND", "No inventory item matches this barcode.", 404, {barcode, mode});
     }
     const messages = {lookup:"Item verified.",receive:"Item accepted for receiving review.",putaway:"Item accepted for put-away review.",pick:"Item accepted for picking review.",count:"Item counted for cycle-count review."};
-    await env.DB.prepare(`INSERT INTO scanner_events (id,barcode,mode,outcome,message,user_id,item_id) VALUES (?,?,?,?,?,?,?)`).bind(id("scan"),barcode,mode,"accepted",messages[mode],user.id,item.id).run();
-    await activity(env,"⌁",`Barcode ${barcode} scanned for ${mode}`,user.id);
+    await env.DB.prepare(`INSERT INTO scanner_events (id,barcode,mode,outcome,message,user_id,item_id,company_id,warehouse_id) VALUES (?,?,?,?,?,?,?,?,?)`).bind(id("scan"),barcode,mode,"accepted",messages[mode],user.id,item.id,user.company_id,user.warehouse_id).run();
+    await activity(env,"⌁",`Barcode ${barcode} scanned for ${mode}`,user.id,user.company_id,user.warehouse_id);
     return json({ok:true, code:"SCAN_ACCEPTED", message:messages[mode], item, mode}, 200);
   }
   if (url.pathname === "/api/arrivals" && request.method === "POST") {
     const input = await body(request); const ref = String(input.ref || "").trim(); const party = String(input.party || "").trim(); const goodsClass = String(input.goodsClass || "Ambient"); const units = Number(input.units || 0);
     if (!ref || !party || !Number.isFinite(units) || units <= 0) return json({error:"Reference, party, and a positive unit count are required."}, 400);
-    const arrivalId = id("arr"); try { await env.DB.prepare(`INSERT INTO arrivals (id,ref,party,goods,expected,status,created_by) VALUES (?,?,?,?,?,?,?)`).bind(arrivalId,ref,party,`${goodsClass} cargo`,`${units.toLocaleString()} units`,"Received",user.id).run(); } catch { return json({error:"That arrival reference already exists."}, 409); }
-    await activity(env, "↘", `Arrival ${ref} recorded by ${user.name}`, user.id); return json({ok:true,id:arrivalId}, 201);
+    const arrivalId = id("arr"); try { await env.DB.prepare(`INSERT INTO arrivals (id,ref,party,goods,expected,status,created_by,company_id,warehouse_id) VALUES (?,?,?,?,?,?,?,?,?)`).bind(arrivalId,ref,party,`${goodsClass} cargo`,`${units.toLocaleString()} units`,"Received",user.id,user.company_id,user.warehouse_id).run(); } catch { return json({error:"That arrival reference already exists."}, 409); }
+    await activity(env, "↘", `Arrival ${ref} recorded by ${user.name}`, user.id,user.company_id,user.warehouse_id); return json({ok:true,id:arrivalId}, 201);
   }
   const putaway = url.pathname.match(/^\/api\/arrivals\/([^/]+)\/putaway$/);
-  if (putaway && request.method === "POST") { const item = await env.DB.prepare(`SELECT ref FROM arrivals WHERE id=?`).bind(putaway[1]).first(); if (!item) return json({error:"Arrival not found"},404); await env.DB.prepare(`UPDATE arrivals SET status='Put away complete' WHERE id=?`).bind(putaway[1]).run(); await activity(env,"⌖",`Put-away completed for ${item.ref}`,user.id); return json({ok:true}); }
+  if (putaway && request.method === "POST") { const item = await env.DB.prepare(`SELECT ref FROM arrivals WHERE id=? AND company_id=? AND warehouse_id=?`).bind(putaway[1],user.company_id,user.warehouse_id).first(); if (!item) return json({error:"Arrival not found"},404); await env.DB.prepare(`UPDATE arrivals SET status='Put away complete' WHERE id=? AND company_id=? AND warehouse_id=?`).bind(putaway[1],user.company_id,user.warehouse_id).run(); await activity(env,"⌖",`Put-away completed for ${item.ref}`,user.id,user.company_id,user.warehouse_id); return json({ok:true}); }
   const pick = url.pathname.match(/^\/api\/orders\/([^/]+)\/start$/);
-  if (pick && request.method === "POST") { const item = await env.DB.prepare(`SELECT order_no FROM orders WHERE id=?`).bind(pick[1]).first(); if (!item) return json({error:"Order not found"},404); await env.DB.prepare(`UPDATE orders SET status='Picking' WHERE id=? AND status='Ready to pick'`).bind(pick[1]).run(); await activity(env,"↗",`Pick wave started for ${item.order_no}`,user.id); return json({ok:true}); }
+  if (pick && request.method === "POST") { const item = await env.DB.prepare(`SELECT order_no FROM orders WHERE id=? AND company_id=? AND warehouse_id=?`).bind(pick[1],user.company_id,user.warehouse_id).first(); if (!item) return json({error:"Order not found"},404); await env.DB.prepare(`UPDATE orders SET status='Picking' WHERE id=? AND company_id=? AND warehouse_id=? AND status='Ready to pick'`).bind(pick[1],user.company_id,user.warehouse_id).run(); await activity(env,"↗",`Pick wave started for ${item.order_no}`,user.id,user.company_id,user.warehouse_id); return json({ok:true}); }
+  const adjust = url.pathname.match(/^\/api\/inventory\/([^/]+)\/adjust$/);
+  if (adjust && request.method === "POST") {
+    if (!['admin','manager','supervisor','forklift'].includes(user.role)) return scannerError("PERMISSION_DENIED", "You do not have permission to adjust inventory.", 403, {requiredRoles:['admin','manager','supervisor','forklift']});
+    const input = await body(request); const delta = Number(input.delta || 0); const nextStatus = input.status === undefined ? null : String(input.status).trim(); const nextLocation = input.location === undefined ? null : String(input.location).trim(); const reason = String(input.reason || '').trim();
+    if (!Number.isInteger(delta) || delta === 0 || !reason) return scannerError("INVENTORY_ADJUSTMENT_INVALID", "Provide a non-zero whole-unit adjustment and a reason.", 400, {fields:['delta','reason']});
+    const item = await env.DB.prepare(`SELECT id,sku,quantity,status,location FROM inventory_items WHERE (id=? OR sku=?) AND company_id=? AND warehouse_id=?`).bind(adjust[1],adjust[1],user.company_id,user.warehouse_id).first();
+    if (!item) return scannerError("INVENTORY_ITEM_NOT_FOUND", "Inventory item not found in your warehouse.", 404, {itemId:adjust[1]});
+    const nextQuantity = item.quantity + delta; if (nextQuantity < 0) return scannerError("INSUFFICIENT_STOCK", "The adjustment would make inventory negative.", 409, {available:item.quantity, requested:delta});
+    const finalStatus = nextStatus || item.status; const finalLocation = nextLocation || item.location;
+    await env.DB.prepare(`UPDATE inventory_items SET quantity=?,status=?,location=? WHERE id=? AND company_id=? AND warehouse_id=?`).bind(nextQuantity,finalStatus,finalLocation,item.id,user.company_id,user.warehouse_id).run();
+    await env.DB.prepare(`INSERT INTO inventory_movements (id,company_id,warehouse_id,inventory_item_id,movement_type,quantity_delta,quantity_before,quantity_after,status_before,status_after,location_before,location_after,reason,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id('mov'),user.company_id,user.warehouse_id,item.id,'manual_adjustment',delta,item.quantity,nextQuantity,item.status,finalStatus,item.location,finalLocation,reason,user.id).run();
+    await env.DB.prepare(`INSERT INTO audit_events (id,company_id,warehouse_id,entity_type,entity_id,action,before_json,after_json,created_by) VALUES (?,?,?,?,?,?,?,?,?)`).bind(id('audit'),user.company_id,user.warehouse_id,'inventory_item',item.id,'adjustment',JSON.stringify(item),JSON.stringify({...item,quantity:nextQuantity,status:finalStatus,location:finalLocation}),user.id).run();
+    await activity(env,'⇄',`Inventory ${item.sku} adjusted by ${delta} unit(s)`,user.id,user.company_id,user.warehouse_id);
+    return json({ok:true,code:'INVENTORY_ADJUSTED',message:'Inventory adjustment recorded.',item:{...item,quantity:nextQuantity,status:finalStatus,location:finalLocation}});
+  }
   return json({error:"Not found"},404);
 }
 
