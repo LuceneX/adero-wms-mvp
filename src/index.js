@@ -3,6 +3,7 @@ const SESSION_COOKIE = "adero_session";
 const SESSION_DAYS = 14;
 
 const json = (value, status = 200, headers = {}) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json; charset=UTF-8", ...headers } });
+const scannerError = (code, message, status = 400, details = {}) => json({ok:false, error:{code, message, details}}, status);
 const html = () => new Response(APP_HTML, { headers: { "content-type": "text/html; charset=UTF-8", "cache-control": "no-cache" } });
 const base64url = bytes => { let binary = ""; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
 const fromBase64url = value => { const normalized = value.replace(/-/g, "+").replace(/_/g, "/"); return Uint8Array.from(atob(normalized + "=".repeat((4 - normalized.length % 4) % 4)), char => char.charCodeAt(0)); };
@@ -26,7 +27,7 @@ async function activity(env, icon, text, userId = null) { await env.DB.prepare(`
 async function dashboard(env) {
   const [arrivals, inventory, orders, activities, counts] = await Promise.all([
     env.DB.prepare(`SELECT id,ref,party,goods,expected,status FROM arrivals ORDER BY created_at DESC`).all(),
-    env.DB.prepare(`SELECT id,sku,lot,location,storage_class,quantity,status FROM inventory_items ORDER BY created_at DESC`).all(),
+    env.DB.prepare(`SELECT id,sku,barcode,lot,location,storage_class,quantity,status FROM inventory_items ORDER BY created_at DESC`).all(),
     env.DB.prepare(`SELECT id,order_no,destination,lines,due,status FROM orders ORDER BY created_at DESC`).all(),
     env.DB.prepare(`SELECT icon,text,relative_time FROM activities ORDER BY created_at DESC LIMIT 8`).all(),
     env.DB.prepare(`SELECT (SELECT COALESCE(SUM(quantity),0) FROM inventory_items) AS units, (SELECT COUNT(*) FROM arrivals WHERE status != 'Received') AS arrivals, (SELECT COUNT(*) FROM orders WHERE status NOT IN ('Dispatched','Complete')) AS orders, (SELECT COUNT(*) FROM inventory_items WHERE status != 'Available') AS exceptions`).first()
@@ -54,6 +55,23 @@ async function api(request, env, url) {
   if (url.pathname === "/api/auth/logout" && request.method === "POST") { const token = cookie(request)[SESSION_COOKIE]; if (token) await env.DB.prepare(`DELETE FROM sessions WHERE token_hash=?`).bind(await digest(token)).run(); return json({ok:true}, 200, {"set-cookie":clearCookie}); }
   const user = await requireUser(request, env);
   if (url.pathname === "/api/dashboard" && request.method === "GET") return json(await dashboard(env));
+  if (url.pathname === "/api/scans" && request.method === "POST") {
+    const input = await body(request);
+    const barcode = String(input.barcode || "").trim();
+    const mode = String(input.mode || "lookup").trim().toLowerCase();
+    const allowedModes = new Set(["lookup", "receive", "putaway", "pick", "count"]);
+    if (!barcode) return scannerError("BARCODE_REQUIRED", "Scan or enter a barcode before submitting.", 400, {field:"barcode"});
+    if (!allowedModes.has(mode)) return scannerError("SCAN_MODE_INVALID", "Choose a valid scanner action.", 400, {allowed:[...allowedModes]});
+    const item = await env.DB.prepare(`SELECT id,sku,barcode,lot,location,storage_class,quantity,status FROM inventory_items WHERE barcode=? OR sku=? LIMIT 1`).bind(barcode, barcode).first();
+    if (!item) {
+      await env.DB.prepare(`INSERT INTO scanner_events (id,barcode,mode,outcome,message,user_id) VALUES (?,?,?,?,?,?)`).bind(id("scan"),barcode,mode,"rejected","Barcode was not found in inventory",user.id).run();
+      return scannerError("BARCODE_NOT_FOUND", "No inventory item matches this barcode.", 404, {barcode, mode});
+    }
+    const messages = {lookup:"Item verified.",receive:"Item accepted for receiving review.",putaway:"Item accepted for put-away review.",pick:"Item accepted for picking review.",count:"Item counted for cycle-count review."};
+    await env.DB.prepare(`INSERT INTO scanner_events (id,barcode,mode,outcome,message,user_id,item_id) VALUES (?,?,?,?,?,?,?)`).bind(id("scan"),barcode,mode,"accepted",messages[mode],user.id,item.id).run();
+    await activity(env,"⌁",`Barcode ${barcode} scanned for ${mode}`,user.id);
+    return json({ok:true, code:"SCAN_ACCEPTED", message:messages[mode], item, mode}, 200);
+  }
   if (url.pathname === "/api/arrivals" && request.method === "POST") {
     const input = await body(request); const ref = String(input.ref || "").trim(); const party = String(input.party || "").trim(); const goodsClass = String(input.goodsClass || "Ambient"); const units = Number(input.units || 0);
     if (!ref || !party || !Number.isFinite(units) || units <= 0) return json({error:"Reference, party, and a positive unit count are required."}, 400);
