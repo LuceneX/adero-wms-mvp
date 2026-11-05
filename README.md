@@ -2,7 +2,8 @@
 
 Conversation-ready warehouse operations MVP for SIA ADERO, deployed as a Cloudflare Worker with static assets.
 
-Public demo: https://adero-wms-mvp.smalikisernests.workers.dev/
+Public demo: https://wms.lucenex.lv/
+Fallback URL: https://adero-wms-mvp.smalikisernests.workers.dev/
 
 This MVP is an original client-specific layer informed by three organization-owned upstream forks:
 
