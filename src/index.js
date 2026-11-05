@@ -1,10 +1,12 @@
 const APP_HTML = "__APP_HTML__";
+const ADMIN_HTML = "__ADMIN_HTML__";
 const SESSION_COOKIE = "adero_session";
+const ACTIVE_WAREHOUSE_COOKIE = "wms_warehouse";
 const SESSION_DAYS = 14;
 
 const json = (value, status = 200, headers = {}) => new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json; charset=UTF-8", ...headers } });
 const scannerError = (code, message, status = 400, details = {}) => json({ok:false, error:{code, message, details}}, status);
-const html = () => new Response(APP_HTML, { headers: { "content-type": "text/html; charset=UTF-8", "cache-control": "no-cache" } });
+const html = request => new Response(new URL(request.url).pathname.startsWith('/admin') ? ADMIN_HTML : APP_HTML, { headers: { "content-type": "text/html; charset=UTF-8", "cache-control": "no-cache" } });
 const base64url = bytes => { let binary = ""; for (const byte of bytes) binary += String.fromCharCode(byte); return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); };
 const fromBase64url = value => { const normalized = value.replace(/-/g, "+").replace(/_/g, "/"); return Uint8Array.from(atob(normalized + "=".repeat((4 - normalized.length % 4) % 4)), char => char.charCodeAt(0)); };
 const randomToken = length => base64url(crypto.getRandomValues(new Uint8Array(length)));
@@ -20,9 +22,14 @@ const id = prefix => `${prefix}-${crypto.randomUUID()}`;
 async function currentUser(request, env) {
   const token = cookie(request)[SESSION_COOKIE];
   if (!token) return null;
-  return env.DB.prepare(`SELECT users.id, users.email, users.name, COALESCE(warehouse_memberships.role, users.role) AS role, warehouse_memberships.company_id, warehouse_memberships.warehouse_id FROM sessions JOIN users ON users.id=sessions.user_id LEFT JOIN warehouse_memberships ON warehouse_memberships.user_id=users.id AND warehouse_memberships.status='active' WHERE sessions.token_hash=? AND sessions.expires_at > datetime('now') LIMIT 1`).bind(await digest(token)).first();
+  const user = await env.DB.prepare(`SELECT users.id, users.email, users.name, users.role FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token_hash=? AND sessions.expires_at > datetime('now') LIMIT 1`).bind(await digest(token)).first();
+  if (!user) return null;
+  const memberships = await env.DB.prepare(`SELECT company_id, warehouse_id, role, status FROM warehouse_memberships WHERE user_id=? AND status='active' ORDER BY created_at`).bind(user.id).all();
+  const selected = memberships.results.find(item => item.warehouse_id === cookie(request)[ACTIVE_WAREHOUSE_COOKIE]) || memberships.results[0];
+  return selected ? {...user, role:selected.role, company_id:selected.company_id, warehouse_id:selected.warehouse_id} : null;
 }
 async function requireUser(request, env) { const user = await currentUser(request, env); if (!user) throw new Response(JSON.stringify({error:"Sign in required"}), {status:401, headers:{"content-type":"application/json"}}); return user; }
+async function requireAdmin(request, env) { const user = await requireUser(request, env); if (user.role !== 'admin') throw new Response(JSON.stringify({ok:false,error:{code:'PERMISSION_DENIED',message:'Administrator permission required.',details:{requiredRole:'admin'}}}), {status:403, headers:{"content-type":"application/json"}}); return user; }
 async function activity(env, icon, text, userId = null, companyId = "co-lucenex-demo", warehouseId = "wh-lucenex-demo") { await env.DB.prepare(`INSERT INTO activities (id,icon,text,relative_time,user_id,company_id,warehouse_id) VALUES (?,?,?,?,?,?,?)`).bind(id("act"), icon, text, "Just now", userId, companyId, warehouseId).run(); }
 async function dashboard(env, user) {
   const [arrivals, inventory, orders, activities, counts] = await Promise.all([
@@ -55,6 +62,46 @@ async function api(request, env, url) {
   if (url.pathname === "/api/auth/logout" && request.method === "POST") { const token = cookie(request)[SESSION_COOKIE]; if (token) await env.DB.prepare(`DELETE FROM sessions WHERE token_hash=?`).bind(await digest(token)).run(); return json({ok:true}, 200, {"set-cookie":clearCookie}); }
   const user = await requireUser(request, env);
   if (url.pathname === "/api/dashboard" && request.method === "GET") return json(await dashboard(env, user));
+  if (url.pathname === "/api/admin/overview" && request.method === "GET") {
+    await requireAdmin(request, env);
+    const [company, warehouses, users] = await Promise.all([
+      env.DB.prepare(`SELECT id,name,created_at FROM companies WHERE id=?`).bind(user.company_id).first(),
+      env.DB.prepare(`SELECT id,code,name,created_at FROM warehouses WHERE company_id=? ORDER BY created_at`).bind(user.company_id).all(),
+      env.DB.prepare(`SELECT users.id,users.email,users.name,users.role,warehouse_memberships.warehouse_id,warehouse_memberships.role AS membership_role,warehouse_memberships.status FROM users JOIN warehouse_memberships ON warehouse_memberships.user_id=users.id WHERE warehouse_memberships.company_id=? ORDER BY users.name`).bind(user.company_id).all()
+    ]);
+    return json({company,warehouses:warehouses.results,users:users.results,activeWarehouseId:user.warehouse_id});
+  }
+  if (url.pathname === "/api/admin/companies" && request.method === "POST") {
+    const admin = await requireAdmin(request, env); const input = await body(request); const name = String(input.name || '').trim();
+    if (!name) return scannerError('COMPANY_NAME_REQUIRED','Company name is required.',400,{field:'name'});
+    const companyId=id('co'), warehouseId=id('wh');
+    await env.DB.prepare(`INSERT INTO companies (id,name) VALUES (?,?)`).bind(companyId,name).run();
+    await env.DB.prepare(`INSERT INTO warehouses (id,company_id,code,name) VALUES (?,?,?,?)`).bind(warehouseId,companyId,'MAIN','Main warehouse').run();
+    await env.DB.prepare(`INSERT INTO warehouse_memberships (user_id,company_id,warehouse_id,role) VALUES (?,?,?,?)`).bind(admin.id,companyId,warehouseId,'admin').run();
+    return json({ok:true,code:'COMPANY_CREATED',company:{id:companyId,name},warehouse:{id:warehouseId,code:'MAIN',name:'Main warehouse'}},201);
+  }
+  if (url.pathname === "/api/admin/warehouses" && request.method === "POST") {
+    const admin = await requireAdmin(request, env); const input = await body(request); const code = String(input.code || '').trim().toUpperCase(); const name = String(input.name || '').trim();
+    if (!code || !name) return scannerError('WAREHOUSE_FIELDS_REQUIRED','Warehouse code and name are required.',400,{fields:['code','name']});
+    try { const warehouseId=id('wh'); await env.DB.prepare(`INSERT INTO warehouses (id,company_id,code,name) VALUES (?,?,?,?)`).bind(warehouseId,admin.company_id,code,name).run(); return json({ok:true,code:'WAREHOUSE_CREATED',warehouse:{id:warehouseId,code,name}},201); } catch { return scannerError('WAREHOUSE_CODE_EXISTS','That warehouse code already exists for this company.',409,{code}); }
+  }
+  if (url.pathname === "/api/admin/memberships" && request.method === "POST") {
+    const admin = await requireAdmin(request, env); const input = await body(request); const email = String(input.email || '').trim().toLowerCase(); const warehouseId = String(input.warehouse_id || '').trim(); const role = String(input.role || 'operator').trim();
+    if (!email || !warehouseId || !['admin','manager','supervisor','forklift','operator'].includes(role)) return scannerError('MEMBERSHIP_FIELDS_INVALID','Email, warehouse, and a valid role are required.',400);
+    const target = await env.DB.prepare(`SELECT id,name,email FROM users WHERE email=?`).bind(email).first(); const warehouse = await env.DB.prepare(`SELECT id FROM warehouses WHERE id=? AND company_id=?`).bind(warehouseId,admin.company_id).first();
+    if (!target) return scannerError('USER_NOT_FOUND','The user must register before they can be assigned.',404,{email});
+    if (!warehouse) return scannerError('WAREHOUSE_NOT_FOUND','Warehouse not found in your company.',404,{warehouseId});
+    await env.DB.prepare(`INSERT INTO warehouse_memberships (user_id,company_id,warehouse_id,role,status) VALUES (?,?,?,?,?) ON CONFLICT(user_id,warehouse_id) DO UPDATE SET role=excluded.role,status='active'`).bind(target.id,admin.company_id,warehouseId,role,'active').run();
+    return json({ok:true,code:'MEMBERSHIP_SAVED',message:'User membership saved.'});
+  }
+  const membership = url.pathname.match(/^\/api\/admin\/memberships\/([^/]+)\/([^/]+)$/);
+  if (membership && request.method === 'PATCH') {
+    const admin = await requireAdmin(request, env); const input = await body(request); const role = input.role === undefined ? null : String(input.role); const status = input.status === undefined ? null : String(input.status); if (role && !['admin','manager','supervisor','forklift','operator'].includes(role)) return scannerError('ROLE_INVALID','Unsupported role.',400); if (status && !['active','disabled'].includes(status)) return scannerError('MEMBERSHIP_STATUS_INVALID','Unsupported membership status.',400);
+    const result = await env.DB.prepare(`UPDATE warehouse_memberships SET role=COALESCE(?,role),status=COALESCE(?,status) WHERE user_id=? AND warehouse_id=? AND company_id=?`).bind(role,status,membership[1],membership[2],admin.company_id).run(); if (!result.meta?.changes) return scannerError('MEMBERSHIP_NOT_FOUND','Membership not found.',404); return json({ok:true,code:'MEMBERSHIP_UPDATED'});
+  }
+  if (url.pathname === "/api/admin/switch-warehouse" && request.method === 'POST') {
+    const admin = await requireAdmin(request, env); const input = await body(request); const warehouseId=String(input.warehouse_id || ''); const allowed=await env.DB.prepare(`SELECT warehouse_id FROM warehouse_memberships WHERE user_id=? AND warehouse_id=? AND status='active'`).bind(admin.id,warehouseId).first(); if (!allowed) return scannerError('WAREHOUSE_ACCESS_DENIED','You are not assigned to that warehouse.',403,{warehouseId}); return json({ok:true,code:'WAREHOUSE_SWITCHED'},200,{"set-cookie":`${ACTIVE_WAREHOUSE_COOKIE}=${warehouseId}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 86400}`});
+  }
   if (url.pathname === "/api/scans" && request.method === "POST") {
     const input = await body(request);
     const barcode = String(input.barcode || "").trim();
@@ -100,4 +147,4 @@ async function api(request, env, url) {
   return json({error:"Not found"},404);
 }
 
-export default { async fetch(request, env) { const url = new URL(request.url); if (url.pathname.startsWith("/api/")) { try { return await api(request, env, url); } catch (error) { if (error instanceof Response) return error; return json({error:"Unexpected application error"}, 500); } } return html(); } };
+export default { async fetch(request, env) { const url = new URL(request.url); if (url.pathname.startsWith("/api/")) { try { return await api(request, env, url); } catch (error) { if (error instanceof Response) return error; return json({error:"Unexpected application error"}, 500); } } return html(request); } };

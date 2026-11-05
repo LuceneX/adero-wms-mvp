@@ -1,1 +1,5 @@
 work/forks/
+node_modules/
+dist-admin/
+.wrangler/
+npm-debug.log*
