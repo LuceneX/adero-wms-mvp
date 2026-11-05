@@ -67,5 +67,17 @@
   start();
 })();
 </script>
+<script>
+  // Keep the public demo identity neutral and separate from the client's internal project name.
+  document.title = 'LuceneX Warehouse Flow — Conversation starter';
+  const replaceVisibleBranding = (node) => {
+    if (node.nodeType === Node.TEXT_NODE && /adero/i.test(node.nodeValue)) {
+      node.nodeValue = node.nodeValue.replace(/ADERO WMS/gi, 'LuceneX Warehouse Flow').replace(/ADERO publicly describes/gi, 'The business context for this demo includes').replace(/LuceneX publicly describes/gi, 'The business context for this demo includes').replace(/ADERO/gi, 'LuceneX');
+    } else if (node.nodeType === Node.ELEMENT_NODE) {
+      node.childNodes.forEach(replaceVisibleBranding);
+    }
+  };
+  replaceVisibleBranding(document.body);
+</script>
 </body>
 </html>

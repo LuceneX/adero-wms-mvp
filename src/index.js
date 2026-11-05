@@ -35,7 +35,7 @@ async function dashboard(env) {
 }
 
 async function api(request, env, url) {
-  if (url.pathname === "/api/health") return json({ok:true, service:"adero-wms-mvp", database:"d1"});
+  if (url.pathname === "/api/health") return json({ok:true, service:"lucenex-warehouse-flow", database:"d1"});
   if (url.pathname === "/api/session" && request.method === "GET") return json({user:await currentUser(request, env)});
   if (url.pathname === "/api/auth/register" && request.method === "POST") {
     const input = await body(request); const email = String(input.email || "").trim().toLowerCase(); const name = String(input.name || "").trim(); const password = String(input.password || "");
