@@ -3,12 +3,13 @@
     <q-header bordered class="bg-white text-grey-9">
       <q-toolbar class="admin-toolbar">
         <q-toolbar-title class="text-weight-medium">LuceneX Admin Console</q-toolbar-title>
-        <q-btn flat dense icon="logout" aria-label="Log out" @click="logout" />
-        <q-btn flat dense icon="open_in_new" label="Open operations" href="/" />
+        <q-btn v-if="data" flat dense icon="logout" aria-label="Log out" @click="logout" />
+        <q-btn v-if="data" flat dense icon="open_in_new" label="Open operations" href="/" />
+        <q-btn v-else-if="!loading" flat dense icon="login" label="Open sign-in" href="/" />
       </q-toolbar>
     </q-header>
 
-    <q-drawer v-model="drawer" show-if-above bordered :width="248" class="bg-grey-10 text-grey-3">
+    <q-drawer v-if="data" v-model="drawer" show-if-above bordered :width="248" class="bg-grey-10 text-grey-3">
       <div class="drawer-brand"><div class="text-h6">LuceneX.</div><div class="text-caption text-grey-5">Platform administration</div></div>
       <q-list padding>
         <q-item clickable :active="activeTab === 'overview'" active-class="nav-active" @click="activeTab='overview'">
@@ -26,7 +27,6 @@
 
     <q-page-container>
       <q-page padding class="admin-page">
-        <q-banner v-if="error" dense rounded class="bg-red-1 text-red-10 q-mb-md"><template #avatar><q-icon name="error" /></template>{{ error }}</q-banner>
         <q-spinner v-if="loading" color="orange-9" size="32px" class="q-mt-xl" />
         <template v-else-if="data">
           <div class="page-heading"><div><div class="text-overline text-grey-7">ADMINISTRATION</div><h1>{{ heading }}</h1><p>{{ subtitle }}</p></div><q-btn color="orange-9" unelevated icon="refresh" label="Refresh" @click="load" /></div>
@@ -51,7 +51,15 @@
             <q-card flat bordered><q-table flat :rows="data.users" :columns="userColumns" row-key="id" :pagination="{rowsPerPage:10}"><template #body-cell-status="props"><q-td :props="props"><q-badge :color="props.row.status === 'active' ? 'positive' : 'grey-7'">{{ props.row.status }}</q-badge></q-td></template><template #body-cell-actions="props"><q-td :props="props"><q-btn flat dense icon="edit" label="Edit" @click="editMembership(props.row)" /></q-td></template></q-table></q-card>
           </section>
         </template>
-        <q-card v-else flat bordered class="q-pa-lg"><div class="text-h6">Administrator access required</div><div class="text-grey-7 q-mt-sm">Sign in as an administrator in the main WMS, then return to the admin console.</div><q-btn class="q-mt-md" color="orange-9" unelevated label="Open sign-in" href="/" /></q-card>
+        <q-card v-else flat bordered class="access-card">
+          <div class="access-icon"><q-icon name="admin_panel_settings" size="28px" /></div>
+          <div class="text-overline text-grey-7">SECURE ADMINISTRATION</div>
+          <h1>Administrator access required</h1>
+          <p>Sign in through the main WMS first. This console will open automatically when the account has administrator permissions.</p>
+          <q-banner v-if="error" dense rounded class="access-error q-mb-md"><template #avatar><q-icon name="info" /></template>{{ error }}</q-banner>
+          <q-btn color="orange-9" unelevated icon="login" label="Go to sign in" href="/" />
+          <div class="access-note">Your session and warehouse selection are protected by the Worker API.</div>
+        </q-card>
       </q-page>
     </q-page-container>
 
@@ -86,5 +94,5 @@ onMounted(load);
 </script>
 
 <style>
-body{margin:0;background:#f5f5f5;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}.admin-shell{background:#f5f5f5}.admin-toolbar{min-height:58px;padding:0 24px}.drawer-brand{padding:20px 18px;border-bottom:1px solid rgba(255,255,255,.12)}.nav-active{background:#45505c!important;color:#fff!important;border-left:3px solid #eb5202}.drawer-foot{position:absolute;bottom:20px;padding:0 18px;color:#8f9aa4;font-size:11px;line-height:1.5}.admin-page{max-width:1420px;margin:0 auto}.page-heading{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;margin-bottom:22px}.page-heading h1{font-size:28px;font-weight:500;margin:2px 0 4px;color:#303030}.page-heading p{margin:0;color:#707070}.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.metric-label{text-transform:uppercase;letter-spacing:.06em;font-size:11px;color:#707070}.metric-value{font-size:22px;font-weight:600;color:#303030;margin-top:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.metric-note{font-size:11px;color:#888;margin-top:4px}.section-actions{display:flex;gap:10px;margin-bottom:14px}@media(max-width:900px){.metric-grid{grid-template-columns:repeat(2,1fr)}.page-heading{display:block}.page-heading .q-btn{margin-top:14px}}@media(max-width:520px){.metric-grid{grid-template-columns:1fr}.admin-toolbar{padding:0 14px}}
+body{margin:0;background:#f5f5f5;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}.admin-shell{background:#f5f5f5}.admin-toolbar{min-height:58px;padding:0 24px}.drawer-brand{padding:20px 18px;border-bottom:1px solid rgba(255,255,255,.12)}.nav-active{background:#45505c!important;color:#fff!important;border-left:3px solid #eb5202}.drawer-foot{position:absolute;bottom:20px;padding:0 18px;color:#8f9aa4;font-size:11px;line-height:1.5}.admin-page{max-width:1420px;margin:0 auto}.page-heading{display:flex;justify-content:space-between;gap:20px;align-items:flex-end;margin-bottom:22px}.page-heading h1{font-size:28px;font-weight:500;margin:2px 0 4px;color:#303030}.page-heading p{margin:0;color:#707070}.metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.metric-label{text-transform:uppercase;letter-spacing:.06em;font-size:11px;color:#707070}.metric-value{font-size:22px;font-weight:600;color:#303030;margin-top:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.metric-note{font-size:11px;color:#888;margin-top:4px}.section-actions{display:flex;gap:10px;margin-bottom:14px}.access-card{max-width:620px;margin:clamp(44px,12vh,120px) auto 0;padding:40px!important;border-radius:4px!important;border-color:#d6d6d6}.access-icon{width:54px;height:54px;display:grid;place-items:center;margin-bottom:22px;background:#fff4e5;color:#eb5202;border-radius:50%}.access-card h1{font-size:30px;line-height:1.15;font-weight:500;color:#303030;margin:6px 0 12px}.access-card p{max-width:500px;color:#666;font-size:14px;line-height:1.65;margin:0 0 22px}.access-error{background:#fff8ed;color:#7c5217;border:1px solid #efd6a7}.access-note{margin-top:20px;color:#8a8a8a;font-size:11px}@media(max-width:900px){.metric-grid{grid-template-columns:repeat(2,1fr)}.page-heading{display:block}.page-heading .q-btn{margin-top:14px}}@media(max-width:520px){.metric-grid{grid-template-columns:1fr}.admin-toolbar{padding:0 14px}.access-card{margin-top:32px;padding:26px!important}.access-card h1{font-size:25px}}
 </style>
